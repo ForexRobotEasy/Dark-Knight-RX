@@ -1,0 +1,104 @@
+
+// Dark Knight RX - Forex Trading Robot
+// Developer's Site: forexroboteasy.com
+// Developed by: Forex Robot Easy Team
+
+// Include necessary libraries
+#include <Trade\Trade.mqh>
+
+// Define constants
+#define TAKE_PROFIT 50        // Take profit level in pips
+#define STOP_LOSS 30          // Stop loss level in pips
+#define STAGNATION_THRESHOLD 5   // Stagnation zone threshold in pips
+
+// Initialize trade object
+CTrade trade;
+
+// Function to implement mean reversal strategy
+void MeanReversalStrategy(double currentPrice, double previousPrice)
+{
+    double priceDifference = currentPrice - previousPrice;
+
+    // Check if the price difference exceeds the stagnation threshold
+    if (MathAbs(priceDifference) > STAGNATION_THRESHOLD)
+    {
+        // Determine the direction of the trade based on the price movement
+        ENUM_ORDER_TYPE orderType = priceDifference > 0 ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+
+        // Calculate entry and exit points based on the current price
+        double entryPrice = currentPrice;
+        double takeProfitPrice = orderType == ORDER_TYPE_SELL ? entryPrice - TAKE_PROFIT * _Point : entryPrice + TAKE_PROFIT * _Point;
+        double stopLossPrice = orderType == ORDER_TYPE_SELL ? entryPrice + STOP_LOSS * _Point : entryPrice - STOP_LOSS * _Point;
+
+        // Open a trade position
+        trade.PositionOpen(Symbol(), orderType, 0.1, entryPrice, stopLossPrice, takeProfitPrice);
+    }
+}
+
+// Function to detect assertive stagnation zones
+bool DetectStagnationZone(double currentPrice, double[] priceHistory)
+{
+    double meanPrice = 0;
+    int count = 0;
+
+    // Calculate the mean price of the price history
+    for (int i = 0; i < ArraySize(priceHistory); i++)
+    {
+        meanPrice += priceHistory[i];
+        count++;
+    }
+
+    meanPrice /= count;
+
+    // Check if the current price is within the stagnation zone
+    if (MathAbs(currentPrice - meanPrice) < STAGNATION_THRESHOLD)
+    {
+        return true;
+    }
+
+    return false;
+}
+
+// Function to adjust take-profit levels based on market volatility
+void AdjustTakeProfitLevel(int ticket)
+{
+    double currentPrice = MarketInfo(Symbol(), MODE_BID);
+    double currentTakeProfit = trade.PositionGetDouble(ticket, POSITION_TP);
+
+    // Check if the current price is within the stagnation zone
+    if (MathAbs(currentPrice - currentTakeProfit) > STAGNATION_THRESHOLD)
+    {
+        // Calculate new take-profit price based on market volatility
+        double newTakeProfit = currentPrice - (TAKE_PROFIT + STOP_LOSS) * _Point;
+
+        // Modify the take-profit level of the trade position
+        trade.PositionModify(ticket, currentTakeProfit, newTakeProfit);
+    }
+}
+
+// Entry point of the program
+void OnTick()
+{
+    double currentPrice = MarketInfo(Symbol(), MODE_BID);
+    double previousPrice = iMA(Symbol(), 0, 1, 0, MODE_EMA, PRICE_CLOSE, 1);
+
+    // Implement mean reversal strategy
+    MeanReversalStrategy(currentPrice, previousPrice);
+
+    // Store price history for stagnation zone detection
+    double[] priceHistory;
+    ArrayResize(priceHistory, 10);
+    ArrayCopySeries(priceHistory, Symbol(), PERIOD_M1, MODE_CLOSE, 0, ArraySize(priceHistory));
+
+    // Check for assertive stagnation zones
+    if (DetectStagnationZone(currentPrice, priceHistory))
+    {
+        // Adjust take-profit levels based on market volatility
+        int totalPositions = trade.PositionsTotal();
+        for (int i = 0; i < totalPositions; i++)
+        {
+            int ticket = trade.PositionGetTicket(i);
+            AdjustTakeProfitLevel(ticket);
+        }
+    }
+}
